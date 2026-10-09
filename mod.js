@@ -293,18 +293,6 @@
       rowOf("Ball dodges opponents", "hops over them toward your team", sw("dodge", "Ball dodges opponents")),
       rowOf("Dodge range", "pixels", dodgeStep.wrap)
     ]);
-    const cloneInfo = () => { pruneClones(); say(clones.length + " clone(s) on court"); };
-    const cloneCard = el("div", { className: "card" }, [
-      el("h4", { textContent: "Clone army" }),
-      el("div", { className: "btns", style: "margin-top:0" }, [
-        btn("+1 my team", () => { spawnClone(teamOf(0, false)); cloneInfo(); }),
-        btn("+1 enemy", () => { spawnClone(teamOf(0, true)); cloneInfo(); }),
-        btn("+3 each", () => { for (let i = 0; i < 3; i++) { spawnClone(teamOf(0, false)); spawnClone(teamOf(0, true)); } cloneInfo(); }),
-        btn("Clear clones", () => { pruneClones(); const n = clones.length; clones.slice().forEach(removeClone); clones = []; say("removed " + n + " clone(s)"); })
-      ])
-    ]);
-    page0.appendChild(dodgeCard);
-    page0.appendChild(cloneCard);
 
     // ===== Advanced tab: every property of live game objects, editable =====
     const targets = [
