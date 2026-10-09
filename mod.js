@@ -211,93 +211,23 @@
       if (!c || c.__bsCloneRemoved) return;
       c.__bsCloneRemoved = true;
       const core = gc() || c.gamecore || null;
-      try { if (c.withBall && typeof c.freeBall === "function") c.freeBall(); } catch (e) {}
-      try { if (typeof c.removeFromPhysics === "function") c.removeFromPhysics(); } catch (e) {}
-      const related = Array.isArray(c.__objs) ? c.__objs.slice() : [];
-      if (!related.includes(c)) related.unshift(c);
-      if (core) {
-        related.forEach((o) => {
-          pull(core.updated, o);
-          pull(core.restarted, o);
-          pull(core.objects, o);
-        });
-        pull(core.playersLeft, c);
-        pull(core.playersRight, c);
-        pull(core.players, c);
-        if (Array.isArray(core.updated)) core.updatedLen = core.updated.length;
+      if (core && typeof core.removeMenuClone === "function") {
+        try { core.removeMenuClone(c); }
+        catch (e) { say("clone cleanup failed: " + String(e.message || e)); }
+      } else {
+        say("clone cleanup requires the patched Basketball Legends game file");
       }
-      const gfx = c.graphic || null;
-      const disp = (c.armature && c.armature.display) || null;
-      try { if (typeof c.release === "function") c.release(); } catch (e) {}
-      detachDisplay(gfx, core);
-      if (disp !== gfx) detachDisplay(disp, core);
       pull(clones, c);
     };
-    const registerClone = (core, c, teamIdx) => {
-      const own = teamIdx === 0 ? core.playersLeft : core.playersRight;
-      const other = teamIdx === 0 ? core.playersRight : core.playersLeft;
-      if (!Array.isArray(own) || !Array.isArray(other)) throw new Error("match player lists are unavailable");
-      pushUnique(core.objects, c);
-      pushUnique(core.updated, c);
-      pushUnique(core.restarted, c);
-      pushUnique(own, c);
-      c.__clone = true;
-      c.isHuman = false;
-      c.opponents = other;
-      c.teamMate = own.find((p) => p !== c) || null;
-      const ctl = c.controller;
-      if (ctl) {
-        try { ctl.player = c; } catch (e) {}
-        try { ctl.opponents = other; } catch (e) {}
-        try { ctl.opponent = other[0] || null; } catch (e) {}
-        try { ctl.teamMate = c.teamMate; } catch (e) {}
-      }
-      if (Array.isArray(core.updated)) core.updatedLen = core.updated.length;
-      if (!c.body.space && typeof c.returnToPhysics === "function") c.returnToPhysics(c.body.position);
-      if (ctl && typeof ctl.restart === "function") {
-        try { ctl.restart(1); } catch (e) {}
-        try { ctl.opponents = other; } catch (e) {}
-        try { ctl.opponent = other[0] || null; } catch (e) {}
-        try { ctl.teamMate = c.teamMate; } catch (e) {}
-      }
-    };
     const spawnClone = (teamIdx) => {
-      const md = gm(), core = gc(), any = livePlayers()[0];
-      if (!md || !core || !any || !window.dragonBones) throw new Error("start a match first");
+      const md = gm(), core = gc();
+      if (!md || !core) throw new Error("start a match first");
+      if (typeof core.createMenuClone !== "function" || !window.__BSClonePatchReady) throw new Error("patched basketball_legends_2019.min.js is not loaded; replace it and reload the game");
       pruneClones();
       if (clones.length >= 12) throw new Error("clone limit reached (12)");
-      const list = cls.skills && cls.skills.botsSkills;
-      if (!Array.isArray(list) || !list.length) throw new Error("bot skills are unavailable");
-      if (!Array.isArray(md.teams) || !Array.isArray(md.forms) || !md.teams[teamIdx] || !md.forms[teamIdx]) throw new Error("team data is unavailable");
-      const d = list[Math.min(list.length - 1, 3)];
-      const game = core.game || (any.graphic && any.graphic.game);
-      if (!game || !game.world || typeof game.world.addChild !== "function") throw new Error("game display world is unavailable");
-      let disp = null, c = null;
-      try {
-        disp = dragonBones.PhaserFactory.factory.buildArmatureDisplay("player");
-        if (!disp) throw new Error("player armature could not be created");
-        if (!disp.parent) game.world.addChild(disp);
-        const before = Array.isArray(core.objects) ? core.objects.length : 0;
-        c = new cls.player(teamIdx, md.teams[teamIdx], Math.floor(Math.random() * 4), md.forms[teamIdx], 1, "B0", d, disp);
-        c.__objs = Array.isArray(core.objects) ? core.objects.slice(before) : [];
-        if (!c.__objs.includes(c)) c.__objs.push(c);
-        c.__clone = true;
-        clones.push(c);
-        if (typeof c.restart === "function") c.restart(0);
-        if (!c.body || !c.body.position || !c.body.velocity) throw new Error("clone physics body was not created");
-        const x = teamIdx === 0 ? rand(120, 360) : rand(440, 680);
-        const y = cls.data && typeof cls.data.PLAYER_INDENT_Y === "number" ? cls.data.PLAYER_INDENT_Y : c.body.position.y;
-        c.body.position.setxy(x, y);
-        c.body.velocity.setxy(0, 0);
-        registerClone(core, c, teamIdx);
-        if (c.graphic && !c.graphic.parent && !c.graphic.parentContainer) game.world.addChild(c.graphic);
-        if (typeof c.updateGraphic === "function") c.updateGraphic();
-        return c;
-      } catch (e) {
-        if (c) removeClone(c);
-        else detachDisplay(disp, core);
-        throw e;
-      }
+      const c = core.createMenuClone(teamIdx, 3);
+      clones.push(c);
+      return c;
     };
     const teamOf = (mine, enemy) => { const m = mineList()[0]; if (!m) throw new Error("start a match first"); const my = m.SIDE === -1 ? 0 : 1; return enemy ? 1 - my : my; };
 
