@@ -185,6 +185,69 @@
       }
     }, true);
 
+
+    // ---------- UI ----------
+    const host = document.createElement("div");
+    host.style.cssText = "position:fixed;top:40px;left:12px;z-index:2147483647;";
+    ["mousedown","mouseup","mousemove","click","dblclick","touchstart","touchmove","touchend","pointerdown","pointermove","pointerup","wheel","contextmenu","keydown","keyup","keypress","input","change"]
+      .forEach((ev) => host.addEventListener(ev, (e) => e.stopPropagation()));
+    const root = host.attachShadow({ mode: "open" });
+    const MONO = "ui-monospace,Menlo,Consolas,monospace";
+    const css = `
+.p{width:340px;color:#000;font:13px -apple-system,system-ui,sans-serif;border-radius:30px;background:linear-gradient(135deg,rgba(255,255,255,.4),rgba(255,255,255,.15));-webkit-backdrop-filter:blur(16px) saturate(180%);backdrop-filter:blur(16px) saturate(180%);box-shadow:0 18px 50px rgba(0,0,0,.35),inset 0 0 0 1px rgba(255,255,255,.4),inset 0 1px 1px rgba(255,255,255,.8);user-select:none;overflow:hidden}
+.h{padding:14px 18px 8px;display:flex;justify-content:space-between;align-items:center;cursor:grab;touch-action:none;font-weight:700;font-size:15px}
+.min{width:28px;height:28px;border-radius:50%;border:1px solid rgba(255,255,255,.6);background:rgba(255,255,255,.4);color:#000;cursor:pointer;padding:0}
+.b{padding:2px 14px 14px;display:flex;flex-direction:column;gap:9px;max-height:calc(100vh - 110px);overflow-y:auto}.b.hide{display:none}
+.tabs{position:relative;display:flex;padding:3px;border-radius:18px;background:rgba(0,0,0,.12)}
+.ind{position:absolute;top:3px;bottom:3px;left:3px;width:calc((100% - 6px) / 2);border-radius:15px;background:rgba(255,255,255,.75);box-shadow:0 2px 8px rgba(0,0,0,.15);transition:transform .5s ${soft}}
+.tabs.t1 .ind{transform:translateX(100%)}
+.tab{flex:1;text-align:center;padding:8px 0;font-weight:600;font-size:12px;border-radius:15px;cursor:pointer;position:relative;z-index:1;opacity:.65;transition:opacity .3s}.tab.on{opacity:1}
+.pg{display:flex;flex-direction:column;gap:9px}.pg.hide{display:none}
+.card{background:rgba(255,255,255,.35);border-radius:22px;padding:10px 12px;box-shadow:inset 0 1px 1px rgba(255,255,255,.8)}
+.card h4{margin:0 0 8px;font-size:12px;opacity:.65;font-weight:700;letter-spacing:.3px;text-transform:uppercase}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px}.card .row+.row{margin-top:9px}
+.lbl{font-weight:600;min-width:0}.lbl small{display:block;opacity:.6;font-size:11px;font-weight:400}
+.sw{width:48px;height:28px;border-radius:14px;background:rgba(0,0,0,.2);position:relative;cursor:pointer;transition:background .3s;flex:none}
+.sw i{position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:11px;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.35);transition:transform .4s ${soft}}
+.sw.on{background:rgba(52,199,89,.9)}.sw.on i{transform:translateX(20px)}
+.step{display:flex;align-items:center;gap:2px;background:rgba(0,0,0,.12);border-radius:15px;padding:3px;flex:none}
+.step button{width:27px;height:27px;border:0;border-radius:12px;background:rgba(255,255,255,.7);color:#000;font-size:16px;cursor:pointer;padding:0}.step button:active{transform:scale(.9)}
+.step input{width:92px;text-align:center;background:transparent;border:0;font:700 12px -apple-system,system-ui,sans-serif;outline:none;padding:0;color:#000;user-select:text;-webkit-user-select:text}
+.keys{font-size:11.5px;line-height:1.5}.keys b{display:inline-block;min-width:16px;text-align:center;background:rgba(255,255,255,.75);border-radius:6px;padding:0 4px;margin-right:3px}
+.status{font:11px ${MONO};opacity:.8;min-height:13px;padding:0 5px;word-break:break-word}
+.sel{width:100%;box-sizing:border-box;height:30px;background:rgba(0,0,0,.14);border:0;border-radius:13px;color:#000;padding:0 10px;font:12.5px -apple-system,system-ui,sans-serif;outline:none;user-select:text;-webkit-user-select:text}
+.btns{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.rbtn{border:0;border-radius:14px;padding:0 12px;height:28px;background:rgba(255,255,255,.7);color:#000;font:600 12px -apple-system,system-ui,sans-serif;cursor:pointer}.rbtn:active{transform:scale(.94)}
+.crumb{font:11px ${MONO};opacity:.7;margin-top:8px;word-break:break-all}
+.tbl{max-height:290px;overflow-y:auto;border-radius:16px;background:rgba(0,0,0,.14);margin-top:8px}
+.tbl::-webkit-scrollbar{width:6px}.tbl::-webkit-scrollbar-thumb{background:rgba(255,255,255,.5);border-radius:3px}
+.tr{min-height:30px;box-sizing:border-box;display:flex;align-items:center;gap:6px;padding:3px 8px;border-bottom:1px solid rgba(255,255,255,.25)}
+.nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font:11px ${MONO}}
+.nm i{font-style:normal;opacity:.55;margin-left:6px;font:10px -apple-system,system-ui,sans-serif}
+.tr input{width:96px;flex:none;box-sizing:border-box;background:rgba(255,255,255,.55);border:0;border-radius:8px;padding:4px 7px;color:#000;font:600 11px ${MONO};outline:none;text-align:right;user-select:text;-webkit-user-select:text}
+.tr input[readonly]{opacity:.6}
+.go{border:0;background:rgba(255,255,255,.7);color:#000;border-radius:8px;width:24px;height:22px;cursor:pointer;padding:0;flex:none}
+.empty{padding:16px;text-align:center;opacity:.6;font-size:12px}`;
+    const el = (tag, props, kids) => { const n = document.createElement(tag); if (props) Object.assign(n, props); (kids || []).forEach((k) => n.appendChild(k)); return n; };
+    const txt = (s) => document.createTextNode(s);
+    const status = el("div", { className: "status", textContent: "ready" });
+    const say = (t) => { status.textContent = t; };
+    const rowOf = (t, sub, ctl) => el("div", { className: "row" }, [el("div", { className: "lbl" }, [txt(t), el("small", { textContent: sub })]), ctl]);
+    const sw = (k, label, extra) => { const s = el("div", { className: "sw" + (S[k] ? " on" : "") }, [el("i")]); s.onclick = () => { S[k] = !S[k]; s.classList.toggle("on", S[k]); say(label + (S[k] ? " ON" : " OFF")); if (extra) extra(S[k]); }; return s; };
+    const btn = (label, fn) => { const b = el("button", { className: "rbtn", textContent: label }); b.onclick = () => { try { fn(); } catch (e) { say(String(e.message || e)); } }; return b; };
+    const stepper = (init, min, max, step, onSet) => {
+      const input = el("input", { type: "text", inputMode: "numeric", value: init });
+      const minus = el("button", { textContent: "−" }), plus = el("button", { textContent: "+" });
+      const wrap = el("div", { className: "step" }, [minus, input, plus]);
+      const set = (v, user) => { v = +v; if (!isFinite(v)) v = min; v = Math.min(max, Math.max(min, Math.round(v / step) * step)); input.value = v; onSet(v, user); };
+      input.onchange = () => set(input.value, true);
+      input.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter") { e.preventDefault(); input.blur(); } });
+      minus.onclick = () => set(+input.value - step, true);
+      plus.onclick = () => set(+input.value + step, true);
+      const sync = (v) => { if (root.activeElement === input || typeof v !== "number" || !isFinite(v)) return; if (String(v) !== input.value) input.value = v; };
+      return { wrap, input, set, sync };
+    };
+
     // ===== General tab =====
     const keysHelp = el("div", { className: "keys" });
     keysHelp.innerHTML = "<div><b>F</b>Alley-oop <b>E</b>Mega dunk <b>Q</b>Defense <b>C</b>Fast break &nbsp;(P1)</div><div><b>J</b>Alley-oop <b>I</b>Mega dunk <b>U</b>Defense <b>M</b>Fast break &nbsp;(P2)</div>";
