@@ -35,16 +35,16 @@
 
   function start(cls) {
     window.__bsMenu = true;
-    const KEY = "bsmenu_v5", saved = (() => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } })();
+    const KEY = "bsmenu_v6", saved = (() => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } })();
     const S = {
       time: false, cpu: false, cool: false, keys: false, cvc: false, acc: 100, dumb: false, dumbLvl: 60,
-      ohio: false, ohioSec: 4, ballSize: 100, playerSize: 100, dodge: false, dodgeRange: 110, tab: 0,
+      dodge: false, dodgeRange: 110, tab: 0,
       ...(saved.s || {})
     };
-    ["three", "dist", "skill"].forEach((k) => delete S[k]);
+    S.dodge = false;
+    S.tab = S.tab === 1 ? 1 : 0;
     const soft = "cubic-bezier(.22,1,.36,1)";
-    const players = new Map(); // player -> last seen time
-    const CH = { ball: 1 };    // temporary multipliers used by chaos events
+    const players = new Map();
 
     const hook = (proto, name, make) => { const o = proto[name]; if (typeof o !== "function" || o.__bs) return; const f = make(o); f.__bs = true; proto[name] = f; };
     const gm = () => { try { return cls.inv.instance.matchData; } catch (e) { return null; } };
@@ -75,27 +75,9 @@
       p.__ai = null; p.__humanCtl = null;
     };
 
-    // ---------- sizes ----------
-    const sizePlayer = (p) => {
-      const k = Math.max(0.01, (S.playerSize / 100) * (p.__chSize || 1));
-      if (p.__psz === k) return;
-      const d = p.armature && p.armature.display; if (!d) return;
-      if (p.__d0 === undefined) p.__d0 = d.scale.x;
-      d.scale.set(p.__d0 * k); p.__psz = k;
-    };
-    const sizeBall = (b) => {
-      const k = Math.max(0.01, (S.ballSize / 100) * CH.ball);
-      if (b.__bsz !== k && b.body) {
-        const sh = b.body.shapes.at(0), c = sh.castCircle || sh;
-        if (b.__r0 === undefined) b.__r0 = c.radius;
-        c.radius = b.__r0 * k; b.__bsz = k;
-      }
-      if (b.graphic) b.graphic.scale.set(k);
-    };
-
     // ---------- ball dodges the opponent ----------
     const dodge = (b) => {
-      if (!S.dodge || !b.body || !b.body.space) return;
+      if (!S.dodge || !b || !b.body || !b.body.space || !b.body.position || !b.body.velocity) return;
       if (["inHands", "dunk", "score", "up"].indexOf(b.state) >= 0) return;
       const mine = mineList(); if (!mine.length) return;
       const side = mine[0].SIDE;
@@ -103,10 +85,10 @@
       const now = performance.now(); if (now - (b.__dt || 0) < 350) return;
       const bx = b.body.position.x, by = b.body.position.y, R = S.dodgeRange;
       for (const [p, t] of players) {
-        if (now - t > 500 || p.SIDE === side || !p.body || !p.body.space) continue;
+        if (now - t > 500 || p.SIDE === side || !p.body || !p.body.space || !p.body.position) continue;
         if (Math.hypot(p.body.position.x - bx, p.body.position.y - by) >= R) continue;
         let near = mine[0];
-        mine.forEach((m) => { if (Math.abs(m.body.position.x - bx) < Math.abs(near.body.position.x - bx)) near = m; });
+        mine.forEach((m) => { if (m.body && m.body.position && Math.abs(m.body.position.x - bx) < Math.abs(near.body.position.x - bx)) near = m; });
         let vx = Math.max(-520, Math.min(520, (near.body.position.x - bx) * 1.1));
         if (Math.abs(near.body.position.x - bx) < 30) vx = (bx < p.body.position.x ? -1 : 1) * 350;
         b.body.velocity.setxy(vx, -650); // hop over their head, toward your team
@@ -120,7 +102,6 @@
     hook(cls.player.prototype, "update", (o) => function () {
       players.set(this, performance.now());
       try { if (S.cvc) aiOn(this); else aiOff(this); } catch (e) { console.warn("cpu vs cpu:", e); S.cvc = false; aiOff(this); }
-      try { sizePlayer(this); } catch (e) {}
       if (S.cool) { this.readyForSuper = true; }
       return o.apply(this, arguments);
     });
@@ -134,7 +115,7 @@
         return r;
       });
       hook(cls.ball.prototype, "update", (o) => function () {
-        try { sizeBall(this); dodge(this); } catch (e) {}
+        try { dodge(this); } catch (e) {}
         return o.apply(this, arguments);
       });
     }
@@ -206,101 +187,119 @@
 
     // ---------- clone army ----------
     let clones = [];
-    const pruneClones = () => { clones = clones.filter((c) => c.body && c.controller && c.graphic); };
+    const pushUnique = (arr, value) => {
+      if (Array.isArray(arr) && value && !arr.includes(value)) arr.push(value);
+    };
+    const pull = (arr, value) => {
+      if (!Array.isArray(arr)) return;
+      let i;
+      while ((i = arr.indexOf(value)) >= 0) arr.splice(i, 1);
+    };
+    const pruneClones = () => { clones = clones.filter((c) => c && !c.__bsCloneRemoved); };
+    const detachDisplay = (node, core) => {
+      if (!node) return;
+      let parent = null;
+      try { parent = node.parent || node.parentContainer || null; } catch (e) {}
+      try {
+        if (parent && typeof parent.removeChild === "function") parent.removeChild(node);
+        else if (parent && typeof parent.remove === "function") parent.remove(node);
+        else if (core && core.game && core.game.world && typeof core.game.world.remove === "function") core.game.world.remove(node);
+        else if (node.game && node.game.world && typeof node.game.world.remove === "function") node.game.world.remove(node);
+      } catch (e) {}
+    };
+    const removeClone = (c) => {
+      if (!c || c.__bsCloneRemoved) return;
+      c.__bsCloneRemoved = true;
+      const core = gc() || c.gamecore || null;
+      try { if (c.withBall && typeof c.freeBall === "function") c.freeBall(); } catch (e) {}
+      try { if (typeof c.removeFromPhysics === "function") c.removeFromPhysics(); } catch (e) {}
+      const related = Array.isArray(c.__objs) ? c.__objs.slice() : [];
+      if (!related.includes(c)) related.unshift(c);
+      if (core) {
+        related.forEach((o) => {
+          pull(core.updated, o);
+          pull(core.restarted, o);
+          pull(core.objects, o);
+        });
+        pull(core.playersLeft, c);
+        pull(core.playersRight, c);
+        pull(core.players, c);
+        if (Array.isArray(core.updated)) core.updatedLen = core.updated.length;
+      }
+      const gfx = c.graphic || null;
+      const disp = (c.armature && c.armature.display) || null;
+      try { if (typeof c.release === "function") c.release(); } catch (e) {}
+      detachDisplay(gfx, core);
+      if (disp !== gfx) detachDisplay(disp, core);
+      pull(clones, c);
+    };
+    const registerClone = (core, c, teamIdx) => {
+      const own = teamIdx === 0 ? core.playersLeft : core.playersRight;
+      const other = teamIdx === 0 ? core.playersRight : core.playersLeft;
+      if (!Array.isArray(own) || !Array.isArray(other)) throw new Error("match player lists are unavailable");
+      pushUnique(core.objects, c);
+      pushUnique(core.updated, c);
+      pushUnique(core.restarted, c);
+      pushUnique(own, c);
+      c.__clone = true;
+      c.isHuman = false;
+      c.opponents = other;
+      c.teamMate = own.find((p) => p !== c) || null;
+      const ctl = c.controller;
+      if (ctl) {
+        try { ctl.player = c; } catch (e) {}
+        try { ctl.opponents = other; } catch (e) {}
+        try { ctl.opponent = other[0] || null; } catch (e) {}
+        try { ctl.teamMate = c.teamMate; } catch (e) {}
+      }
+      if (Array.isArray(core.updated)) core.updatedLen = core.updated.length;
+      if (!c.body.space && typeof c.returnToPhysics === "function") c.returnToPhysics(c.body.position);
+      if (ctl && typeof ctl.restart === "function") {
+        try { ctl.restart(1); } catch (e) {}
+        try { ctl.opponents = other; } catch (e) {}
+        try { ctl.opponent = other[0] || null; } catch (e) {}
+        try { ctl.teamMate = c.teamMate; } catch (e) {}
+      }
+    };
     const spawnClone = (teamIdx) => {
       const md = gm(), core = gc(), any = livePlayers()[0];
       if (!md || !core || !any || !window.dragonBones) throw new Error("start a match first");
       pruneClones();
       if (clones.length >= 12) throw new Error("clone limit reached (12)");
       const list = cls.skills && cls.skills.botsSkills;
+      if (!Array.isArray(list) || !list.length) throw new Error("bot skills are unavailable");
+      if (!Array.isArray(md.teams) || !Array.isArray(md.forms) || !md.teams[teamIdx] || !md.forms[teamIdx]) throw new Error("team data is unavailable");
       const d = list[Math.min(list.length - 1, 3)];
-      const game = core.game || any.graphic.game;
-      const disp = dragonBones.PhaserFactory.factory.buildArmatureDisplay("player");
-      game.world.addChild(disp);
-      const before = core.objects.length;
-      const c = new cls.player(teamIdx, md.teams[teamIdx], Math.floor(Math.random() * 4), md.forms[teamIdx], 1, "B0", d, disp);
-      c.__objs = core.objects.slice(before);
-      try { c.restart(0); } catch (e) {}
-      c.body.position.setxy(rand(120, 680), cls.data.PLAYER_INDENT_Y);
-      c.body.velocity.setxy(0, 0);
-      try { c.updateGraphic(); } catch (e) {}
-      clones.push(c);
-      return c;
-    };
-    const removeClone = (c) => {
-      const core = gc(); if (!core) return;
-      try { if (c.withBall) c.freeBall(); } catch (e) {}
-      const objs = c.__objs && c.__objs.length ? c.__objs : [c];
-      const pull = (arr, o) => { const i = arr.indexOf(o); if (i >= 0) arr.splice(i, 1); };
-      objs.forEach((o) => { pull(core.updated, o); pull(core.restarted, o); pull(core.objects, o); });
-      pull(core.playersLeft, c); pull(core.playersRight, c);
-      core.updatedLen = core.updated.length;
-      const gfx = c.graphic, disp = c.armature && c.armature.display;
-      objs.slice().reverse().forEach((o) => { try { o.release(); } catch (e) {} });
-      try { gfx && gfx.destroy && gfx.destroy(true); } catch (e) {}
-      try { disp && disp.destroy && disp.destroy(); } catch (e) {}
+      const game = core.game || (any.graphic && any.graphic.game);
+      if (!game || !game.world || typeof game.world.addChild !== "function") throw new Error("game display world is unavailable");
+      let disp = null, c = null;
+      try {
+        disp = dragonBones.PhaserFactory.factory.buildArmatureDisplay("player");
+        if (!disp) throw new Error("player armature could not be created");
+        if (!disp.parent) game.world.addChild(disp);
+        const before = Array.isArray(core.objects) ? core.objects.length : 0;
+        c = new cls.player(teamIdx, md.teams[teamIdx], Math.floor(Math.random() * 4), md.forms[teamIdx], 1, "B0", d, disp);
+        c.__objs = Array.isArray(core.objects) ? core.objects.slice(before) : [];
+        if (!c.__objs.includes(c)) c.__objs.push(c);
+        c.__clone = true;
+        clones.push(c);
+        if (typeof c.restart === "function") c.restart(0);
+        if (!c.body || !c.body.position || !c.body.velocity) throw new Error("clone physics body was not created");
+        const x = teamIdx === 0 ? rand(120, 360) : rand(440, 680);
+        const y = cls.data && typeof cls.data.PLAYER_INDENT_Y === "number" ? cls.data.PLAYER_INDENT_Y : c.body.position.y;
+        c.body.position.setxy(x, y);
+        c.body.velocity.setxy(0, 0);
+        registerClone(core, c, teamIdx);
+        if (c.graphic && !c.graphic.parent && !c.graphic.parentContainer) game.world.addChild(c.graphic);
+        if (typeof c.updateGraphic === "function") c.updateGraphic();
+        return c;
+      } catch (e) {
+        if (c) removeClone(c);
+        else detachDisplay(disp, core);
+        throw e;
+      }
     };
     const teamOf = (mine, enemy) => { const m = mineList()[0]; if (!m) throw new Error("start a match first"); const my = m.SIDE === -1 ? 0 : 1; return enemy ? 1 - my : my; };
-
-    // ---------- OHIO MODE: random nonsense on a timer ----------
-    const alive = () => livePlayers().filter((p) => p.body && p.body.space && !p.__away);
-    const temp = (set, undo, ms) => { set(); setTimeout(() => { try { undo(); } catch (e) {} }, ms); };
-    const space = () => { const b = gc() && gc().ball; return b && (b.space1 || (b.body && b.body.space)); };
-    const leaveCourt = (p) => {
-      if (!p || p.__away || !p.body || !p.body.space) return;
-      p.__away = true;
-      try { if (p.withBall) p.freeBall(); } catch (e) {}
-      const g = p.graphic.game, gy = p.body.position.y;
-      p.removeFromPhysics();
-      try { p.playState("fly1"); } catch (e) {}
-      g.add.tween(p.graphic).to({ x: Math.random() < 0.5 ? -240 : 1040, y: rand(-260, 420) }, 650).start();
-      setTimeout(() => {
-        try {
-          if (!p.graphic) { p.__away = false; return; }
-          const bx = rand(150, 650), t = g.add.tween(p.graphic).to({ x: bx, y: gy }, 650);
-          t.onComplete.addOnce(() => {
-            try { p.body.position.setxy(bx, gy); p.returnToPhysics(p.body.position); p.canTakeInHands = true; p.canAct = true; p.playState("idle"); } catch (e) {}
-            p.__away = false;
-          });
-          t.start();
-        } catch (e) { p.__away = false; }
-      }, rand(1500, 3500));
-    };
-    const withBall = (fn) => () => { const b = gc() && gc().ball; if (b && b.body && b.state !== "inHands") fn(b); };
-    const EVENTS = [
-      ["player yeeted offscreen", () => { const p = pick(alive()); p.body.velocity.setxy(rand(-700, 700), -rand(1500, 2300)); }],
-      ["player left the court", () => leaveCourt(pick(alive()))],
-      ["everybody left the court", () => alive().forEach((p, i) => setTimeout(() => leaveCourt(p), i * 250))],
-      ["giant ball", () => temp(() => { CH.ball = rand(2.5, 6); }, () => { CH.ball = 1; }, 4000)],
-      ["tiny ball", () => temp(() => { CH.ball = rand(0.2, 0.5); }, () => { CH.ball = 1; }, 4000)],
-      ["giant player", () => { const p = pick(alive()); temp(() => { p.__chSize = rand(2, 4); }, () => { p.__chSize = 1; }, 5000); }],
-      ["tiny player", () => { const p = pick(alive()); temp(() => { p.__chSize = rand(0.25, 0.5); }, () => { p.__chSize = 1; }, 5000); }],
-      ["zero-gravity ball", withBall((b) => { if (b.__zg) return; const g0 = b.body.gravMass; b.__zg = true; b.body.gravMass = g0 * 0.03; setTimeout(() => { try { b.body.gravMass = g0; } catch (e) {} b.__zg = false; }, 2500); })],
-      ["moon gravity", () => { const sp = space(); if (!sp || sp.__gmod) return; const g0 = sp.gravity.y; sp.__gmod = true; sp.gravity.y = g0 * 0.25; setTimeout(() => { try { sp.gravity.y = g0; } catch (e) {} sp.__gmod = false; }, 4000); }],
-      ["gravity flipped", () => { const sp = space(); if (!sp || sp.__gmod) return; const g0 = sp.gravity.y; sp.__gmod = true; sp.gravity.y = -g0; setTimeout(() => { try { sp.gravity.y = g0; } catch (e) {} sp.__gmod = false; }, 1200); }],
-      ["slow motion", () => { const c = gc(); c.timeScale = 0.25; setTimeout(() => { c.timeScale = 1; }, 2500); }],
-      ["fast forward", () => { const c = gc(); c.timeScale = 2.5; setTimeout(() => { c.timeScale = 1; }, 2500); }],
-      ["ball teleported", withBall((b) => { b.body.position.setxy(rand(100, 700), rand(60, 300)); b.body.velocity.setxy(rand(-400, 400), -rand(0, 400)); })],
-      ["ball went crazy", withBall((b) => { b.body.velocity.setxy(rand(-900, 900), -rand(300, 1200)); })],
-      ["random super move", () => fire(pick(alive()), pick(["alley", "mega", "defense", "fast"]))],
-      ["players shuffled", () => alive().forEach((p) => { p.body.position.setxy(rand(100, 700), p.body.position.y); p.body.velocity.setxy(0, 0); })],
-      ["scoreboard bug", () => { const m = gm(); const i = Math.floor(Math.random() * 2); setScore(i, Math.max(0, m.matchScore[i] + Math.round(rand(-6, 14)))); }],
-      ["clone dropped in", () => spawnClone(Math.random() < 0.5 ? 0 : 1)]
-    ];
-    const runEvent = (idx) => {
-      const ev = idx === undefined ? pick(EVENTS) : EVENTS[idx];
-      try { ev[1](); say("OHIO: " + ev[0]); } catch (e) { say("OHIO: " + ev[0] + " (failed: " + (e.message || e) + ")"); }
-    };
-    let nextAt = 0;
-    setInterval(() => {
-      if (!S.ohio) return;
-      const now = performance.now();
-      if (!alive().length) return;
-      if (!nextAt) nextAt = now + 1500;
-      if (now < nextAt) return;
-      nextAt = now + Math.max(0.3, S.ohioSec) * 1000 * rand(0.5, 1.5);
-      runEvent();
-    }, 150);
 
     // ---------- UI ----------
     const host = document.createElement("div");
@@ -315,8 +314,8 @@
 .min{width:28px;height:28px;border-radius:50%;border:1px solid rgba(255,255,255,.6);background:rgba(255,255,255,.4);color:#000;cursor:pointer;padding:0}
 .b{padding:2px 14px 14px;display:flex;flex-direction:column;gap:9px;max-height:calc(100vh - 110px);overflow-y:auto}.b.hide{display:none}
 .tabs{position:relative;display:flex;padding:3px;border-radius:18px;background:rgba(0,0,0,.12)}
-.ind{position:absolute;top:3px;bottom:3px;left:3px;width:calc((100% - 6px) / 3);border-radius:15px;background:rgba(255,255,255,.75);box-shadow:0 2px 8px rgba(0,0,0,.15);transition:transform .5s ${soft}}
-.tabs.t1 .ind{transform:translateX(100%)}.tabs.t2 .ind{transform:translateX(200%)}
+.ind{position:absolute;top:3px;bottom:3px;left:3px;width:calc((100% - 6px) / 2);border-radius:15px;background:rgba(255,255,255,.75);box-shadow:0 2px 8px rgba(0,0,0,.15);transition:transform .5s ${soft}}
+.tabs.t1 .ind{transform:translateX(100%)}
 .tab{flex:1;text-align:center;padding:8px 0;font-weight:600;font-size:12px;border-radius:15px;cursor:pointer;position:relative;z-index:1;opacity:.65;transition:opacity .3s}.tab.on{opacity:1}
 .pg{display:flex;flex-direction:column;gap:9px}.pg.hide{display:none}
 .card{background:rgba(255,255,255,.35);border-radius:22px;padding:10px 12px;box-shadow:inset 0 1px 1px rgba(255,255,255,.8)}
@@ -403,22 +402,6 @@
     ]);
     const page0 = el("div", { className: "pg" }, [general, cpuCard, scoreCard]);
 
-    // ===== Chaos tab =====
-    const ohioStep = stepper(S.ohioSec, 1, BIG, 1, (v, user) => { S.ohioSec = v; if (user) say("a random event every ~" + v + "s"); });
-    const ohioCard = el("div", { className: "card" }, [
-      el("h4", { textContent: "Ohio mode" }),
-      rowOf("Ohio mode", "random nonsense keeps happening", sw("ohio", "Ohio mode")),
-      rowOf("Event every", "seconds (randomised)", ohioStep.wrap),
-      el("div", { className: "btns" }, [btn("Random event now", () => runEvent()), btn("List events", () => say(EVENTS.map((e) => e[0]).join(" | ")))])
-    ]);
-    const ballSzStep = stepper(S.ballSize, 1, BIG, 10, (v, user) => { S.ballSize = v; if (user) say("ball size " + v + "%"); });
-    const plSzStep = stepper(S.playerSize, 1, BIG, 10, (v, user) => { S.playerSize = v; if (user) say("player size " + v + "% (visual)"); });
-    const sizeCard = el("div", { className: "card" }, [
-      el("h4", { textContent: "Sizes" }),
-      rowOf("Ball size", "% (100 = normal)", ballSzStep.wrap),
-      rowOf("Player size", "% - visual only", plSzStep.wrap),
-      el("div", { className: "btns" }, [btn("Reset sizes", () => { ballSzStep.set(100, true); plSzStep.set(100, true); })])
-    ]);
     const dodgeStep = stepper(S.dodgeRange, 1, BIG, 10, (v, user) => { S.dodgeRange = v; if (user) say("dodge range " + v + "px"); });
     const dodgeCard = el("div", { className: "card" }, [
       el("h4", { textContent: "Ball" }),
@@ -435,7 +418,8 @@
         btn("Clear clones", () => { pruneClones(); const n = clones.length; clones.slice().forEach(removeClone); clones = []; say("removed " + n + " clone(s)"); })
       ])
     ]);
-    const page1 = el("div", { className: "pg hide" }, [ohioCard, sizeCard, dodgeCard, cloneCard]);
+    page0.appendChild(dodgeCard);
+    page0.appendChild(cloneCard);
 
     // ===== Advanced tab: every property of live game objects, editable =====
     const targets = [
@@ -519,30 +503,32 @@
     const page2 = el("div", { className: "pg hide" }, [adv]);
 
     // ===== tab bar =====
-    const tabNames = ["General", "Chaos", "Advanced"];
+    const tabNames = ["General", "Advanced"];
     const tabEls = tabNames.map((n, i) => { const t = el("div", { className: "tab", textContent: n }); t.onclick = () => setTab(i); return t; });
     const tabs = el("div", { className: "tabs" }, [el("div", { className: "ind" }), ...tabEls]);
-    const pages = [page0, page1, page2];
+    const pages = [page0, page2];
     const setTab = (i) => {
-      S.tab = i; tabs.classList.toggle("t1", i === 1); tabs.classList.toggle("t2", i === 2);
+      i = i === 1 ? 1 : 0;
+      S.tab = i;
+      tabs.classList.toggle("t1", i === 1);
       tabEls.forEach((t, j) => t.classList.toggle("on", j === i));
       pages.forEach((p, j) => p.classList.toggle("hide", j !== i));
-      if (i === 2 && !cur) load();
+      if (i === 1 && !cur) load();
     };
 
     const minBtn = el("button", { className: "min", textContent: "–" });
-    const head = el("div", { className: "h" }, [el("span", { textContent: "Basketball Stars" }), minBtn]);
-    const body = el("div", { className: "b" }, [tabs, page0, page1, page2, status]);
+    const head = el("div", { className: "h" }, [el("span", { textContent: "Basketball Legends" }), minBtn]);
+    const body = el("div", { className: "b" }, [tabs, page0, page2, status]);
     const panel = el("div", { className: "p" }, [head, body]);
     root.appendChild(el("style", { textContent: css })); root.appendChild(panel); document.body.appendChild(host);
-    setTab(S.tab >= 0 && S.tab <= 2 ? S.tab : 0);
+    setTab(S.tab === 1 ? 1 : 0);
 
     // live values: score boxes + Advanced rows (skips the box you're typing in)
     setInterval(() => {
       if (body.classList.contains("hide")) return;
       try {
         if (S.tab === 0) { const m = gm(); if (m && m.matchScore) { s1.sync(m.matchScore[0]); s2.sync(m.matchScore[1]); } }
-        else if (S.tab === 2 && cur) rowsLive.forEach(({ k, inp }) => {
+        else if (S.tab === 1 && cur) rowsLive.forEach(({ k, inp }) => {
           if (root.activeElement === inp) return;
           const t = fmtv(cur.obj[k]); if (inp.value !== t) inp.value = t;
         });
@@ -559,7 +545,7 @@
     head.addEventListener("pointerup", () => { drag = false; });
     minBtn.onclick = () => body.classList.toggle("hide");
     setInterval(() => { try { localStorage.setItem(KEY, JSON.stringify({ s: S, pos: { l: host.offsetLeft, t: host.offsetTop }, min: body.classList.contains("hide") })); } catch (e) {} }, 2000);
-    window.__BS = { S, players, fire, cls, runEvent, spawnClone };
-    console.log("Basketball Stars menu loaded");
+    window.__BS = { S, players, fire, cls, spawnClone, removeClone, get clones() { return clones.slice(); } };
+    console.log("Basketball Legends menu loaded");
   }
 })();
